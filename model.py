@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class ESMEvaluator():
+class CoDP():
     def __init__(self,checkpoints_to_run,esm_name):
         bins_setting = {
         'first_break': 2.3125,

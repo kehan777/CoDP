@@ -1,4 +1,4 @@
-from model import ESMEvaluator
+from model import CoDP
 from LigandMPNN.package import MPNNModel
 import argparse
 import os
@@ -140,7 +140,7 @@ def main():
         ##! need change
         esm_name = "/home/fangmc/.cache/huggingface/hub/models--facebook--esm2_t33_650M_UR50D"
         
-        evaluator = ESMEvaluator(checkpoints_to_run,esm_name)
+        evaluator = CoDP(checkpoints_to_run,esm_name)
         mpnn_config_dict["num_seqs"] = args.num_seqs
         mpnn_config_dict["num_seqs"] = mpnn_config_dict["num_seqs"] * 8
     else:
