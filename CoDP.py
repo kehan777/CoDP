@@ -2,26 +2,17 @@ from model import CoDP
 from LigandMPNN.package import MPNNModel
 import argparse
 import os
+import pickle
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Process multiple PDB files with AF3 based optimizer')
-    parser.add_argument('--pdb_list', type=str, required=False,
-                       help='Path to text file containing list of PDB files')
-    parser.add_argument('--input_file', type=str, required=False,
+    parser.add_argument('--input_file_pkl', type=str, required=True,
                        help='input file path')
-    parser.add_argument('--fix_res_index', type=str, required=False, 
-                        help='Fixed residue indices, e.g. A1 B4 but be careful, we will reindex all to begin with 1')
-    parser.add_argument('--fix_chain_index', type=str, required=False,
-                        help='Fixed chain indices, e.g. A B')
-    parser.add_argument('--output_dir', type=str, required=True,
-                       help='Directory for output files')
+    parser.add_argument('--output_file_pkl', type=str, required=True,
+                       help='Directory for output')
     parser.add_argument('--num_seqs', type=int, default=8,
                        help='Number of proteinMPNN or LigadnMPNN+proteinMPNN seqs to perform self consistency')
-    parser.add_argument('--esmhead', action='store_true', default=False,
-                    help='whether to use esmhead to validate sequence quality')
-    parser.add_argument('--mpnn',  type=str,  required=False,
-                    help='which mpnn model do you choose proteinmpnn ligandmpnn ligandmpnn_plus_proteinmpnn')
-    parser.add_argument('--mpnn_temperature', type=float, default=0.1,
-                       help='mpnn temperature to use')
+    parser.add_argument('--pdb_file', type=str, required=False,
+                       help='input pdb path')
     return parser.parse_args()
 
 def run_purempnn_evaluation(mpnn_model,scaffold_path,mpnn_config_dict,pocket_res_to_fix,weights_str,output_dir,bias_AA,symmetry_residues):  
@@ -117,93 +108,51 @@ def run_selection_process(sequences, packed_paths, evaluator, scaffold_path, num
                     final_score = item[2]
                     break
         
-            final_results.append((seq, packed,  final_score))
+            final_results.append((seq, packed, final_score))
 
     final_results.sort(key=lambda x: -x[2])
 
     end_time = time.time()
     elapsed_time = end_time - start_time
-    
     return final_results
 
 
 
 def main():
     args = parse_arguments()
-    mpnn_config_dict = {
-            "temperature": args.mpnn_temperature,
-            "model_name": args.mpnn, #"ligandmpnn_plus_proteinmpnn"
-            "num_seqs": 1
-            }
-    if args.esmhead:
-        checkpoints_to_run = os.path.dirname(os.path.abspath(__file__))+ "/ckpt/epoch_1_without_esm2.pth"
-        ##! need change
-        esm_name = "facebook/esm2_t33_650M_UR50D"
-        
-        evaluator = CoDP(checkpoints_to_run,esm_name)
-        mpnn_config_dict["num_seqs"] = args.num_seqs
-        mpnn_config_dict["num_seqs"] = mpnn_config_dict["num_seqs"] * 8
-    else:
-        evaluator = None
+    checkpoints_to_run = os.path.dirname(os.path.abspath(__file__))+ "/ckpt/epoch_1_without_esm2.pth"
+    ##! need change
+    esm_name = "facebook/esm2_t33_650M_UR50D" # 
+    evaluator = CoDP(checkpoints_to_run,esm_name)
 
-    if args.pdb_list:
-        with open(args.pdb_list, 'r') as f:
-            pdb_files = [line.strip() for line in f if line.strip()]
-    elif args.input_file:
-        pdb_files = [args.input_file]
-    else:
-        raise ValueError("You must specify either --pdb_list or --input_file")
-    
-    if args.mpnn == "protein_mpnn":
-        mpnn_model = MPNNModel(model_name="protein_mpnn",
-                        T=args.mpnn_temperature, 
-                        ligand_mpnn_use_side_chain_context=1,
-                        ligand_mpnn_use_atom_context=1,
-                        number_of_packs_per_design=1,
-                        pack_side_chains=1,
-                        parse_atoms_with_zero_occupancy=1,
-                        pack_with_ligand_context= 0,
-                        repack_everything=1)
-        #raise ValueError("protein_mpnn can not use in small molecular or dna or rna system design")
-    if args.mpnn == "ligand_mpnn":
-        mpnn_model = MPNNModel(model_name=args.mpnn,
-                        T=args.mpnn_temperature, 
-                        ligand_mpnn_use_side_chain_context=1,
-                        ligand_mpnn_use_atom_context=1,
-                        number_of_packs_per_design=1,
-                        pack_side_chains=1,
-                        parse_atoms_with_zero_occupancy=1,
-                        pack_with_ligand_context= 0,
-                        repack_everything=1)
-    
-    
-    for pdb_file in pdb_files:
-        sequences,packed_paths=run_purempnn_evaluation(mpnn_model,pdb_file,mpnn_config_dict,"","",args.output_dir,"","")
-        print(sequences,packed_paths)
-        if evaluator :
-            num_seqs = int(mpnn_config_dict["num_seqs"]/8 )
-            #scores = evaluator.predict(sequences, scaffold_path)
-            #interaction_data = [(seq, packed, 0, 0, 0, score) for seq, packed, score in zip(sequences, packed_paths, scores)]
-            #updated_sequences = sorted(interaction_data, key=lambda x: -x[5])[:num_seqs]
-            batchsizes = [8, 4, 2]
-            last_error = None
+    with open(args.input_file_pkl, "rb") as f:
+        input_file_pkl = pickle.load(f)
+    [sequences, packed_paths]= input_file_pkl
+    print(sequences,packed_paths)
+    if evaluator :
+        num_seqs = args.num_seqs
+        batchsizes = [8, 4, 2]
+        last_error = None
 
-            for batchsize in batchsizes:
-                try:
-                    updated_sequences = run_selection_process(
-                        sequences, packed_paths, evaluator, pdb_file, num_seqs, batchsize,
-                    )
-                    print(f"✅ Successfully ran with batchsize: {batchsize}")
-                    break  # successful execution, exit the loop
-                except Exception as e:
-                    last_error = e
-                    print(f"⚠️ Batchsize {batchsize} failed: {e}. Trying smaller batchsize...")
-            else:  # loop exhausted without break
-                print("❌ All batchsizes failed. Raising last error.")
-                raise last_error
-        else:
-            print("no esmhead")
-        print(updated_sequences)
+        for batchsize in batchsizes:
+            try:
+                updated_sequences = run_selection_process(
+                    sequences, packed_paths, evaluator, args.pdb_file, num_seqs, batchsize,
+                )
+                print(f"✅ Successfully ran with batchsize: {batchsize}")
+                break  # successful execution, exit the loop
+            except Exception as e:
+                last_error = e
+                print(f"⚠️ Batchsize {batchsize} failed: {e}. Trying smaller batchsize...")
+        else:  # loop exhausted without break
+            print("❌ All batchsizes failed. Raising last error.")
+            raise last_error
+    else:
+        print("no esmhead")
+    print(updated_sequences)
+    updated_sequences_path = args.output_file_pkl
+    with open(updated_sequences_path, "wb") as f:
+        pickle.dump(updated_sequences, f)
 
 
 if __name__ == "__main__":
